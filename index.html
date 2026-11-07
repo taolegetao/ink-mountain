@@ -1,36 +1,43 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no"><title>一笔成山 · 水墨版</title>
 <style>
-*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#f4f0e7;color:#272723;font-family:system-ui,-apple-system,sans-serif}
-canvas{display:block;width:100vw;height:100dvh;touch-action:none}
-header{position:fixed;top:calc(14px + env(safe-area-inset-top));left:16px;right:16px;display:flex;align-items:flex-start;justify-content:space-between;gap:12px;pointer-events:none}
-h1{font-size:19px;letter-spacing:3px;font-weight:500;margin:0}small{display:block;margin-top:5px;font-size:11px;color:#807e76}
-.controls{display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:8px;pointer-events:auto}
-button{background:#f4f0e7e8;border:1px solid #aaa69c;color:#272723;border-radius:20px;padding:8px 13px;font-size:13px}
-.panel{position:fixed;bottom:calc(20px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);width:min(360px,calc(100vw - 36px));background:#f4f0e7ee;border:1px solid #d3cdc0;border-radius:16px;padding:13px 17px;box-shadow:0 5px 20px #2222220c}
-.panel label{display:flex;justify-content:space-between;font-size:13px;margin-bottom:9px}
-input[type=range]{width:100%;accent-color:#292a28;touch-action:auto}
-.note{text-align:center;font-size:11px;color:#858077;margin-top:6px}
-</style></head><body><canvas id="c"></canvas>
-<header><div><h1>一笔成山</h1><small>墨落成峦 · 一线生山</small></div><div class="controls"><button id="undo">撤回</button><button id="clear">清空</button></div></header>
-<div class="panel"><label for="opacity">山体墨色透明度 <output id="value">20%</output></label><input id="opacity" type="range" min="0" max="100" step="1" value="20"><div class="note">横向画出山脊，松开后墨水缓缓落下</div></div>
-<script>
-const c=document.getElementById('c'),g=c.getContext('2d'),slider=document.getElementById('opacity'),value=document.getElementById('value');
-let W=0,H=0,D=1,mountains=[],stroke=[],drawing=false;
-function resize(){D=Math.min(devicePixelRatio||1,2);W=innerWidth;H=innerHeight;c.width=Math.round(W*D);c.height=Math.round(H*D);g.setTransform(D,0,0,D,0,0)}addEventListener('resize',resize);resize();
+*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:#eeeae0;color:#242522;font-family:system-ui,-apple-system,sans-serif}
+body{display:flex;justify-content:center}main{width:min(100%,900px);min-height:100dvh;padding:calc(20px + env(safe-area-inset-top)) 18px calc(24px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:16px}
+header{text-align:center;flex-shrink:0}h1{font-size:24px;letter-spacing:6px;font-weight:500;margin:0 0 6px}header p{font-size:12px;color:#89857b;letter-spacing:2px;margin:0}
+.frame{position:relative;flex:1;min-height:220px;max-height:68dvh;border:1px solid #bbb6a9;background:#f7f4eb;overflow:hidden;box-shadow:0 2px 12px #2928200a}
+canvas{width:100%;height:100%;display:block;touch-action:none}
+.panel{flex-shrink:0;padding:16px 18px 14px;background:#f7f4eb;border:1px solid #d4cec0;border-radius:12px}
+label{display:flex;justify-content:space-between;align-items:center;font-size:14px;margin-bottom:11px}output{font-variant-numeric:tabular-nums}
+input[type=range]{display:block;width:100%;accent-color:#262724;touch-action:auto}
+.actions{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:17px}
+button{border:1px solid #aaa69c;background:#f7f4eb;border-radius:8px;color:#242522;padding:12px 4px;font-size:14px}
+button:disabled{opacity:.35}button:active:not(:disabled){background:#e4e0d5}
+.hint{text-align:center;font-size:12px;color:#89857b;margin:0;flex-shrink:0}
+@media(min-width:700px){main{padding-top:34px;padding-bottom:30px}.frame{max-height:66dvh;min-height:380px}}
+</style></head><body><main>
+<header><h1>一笔成山</h1><p>以线为脊 · 墨落成峦</p></header>
+<div class="frame" id="frame"><canvas id="c"></canvas></div>
+<section class="panel"><label for="opacity"><span>山体墨色透明度</span><output id="value">20%</output></label><input id="opacity" type="range" min="0" max="100" step="1" value="20"><div class="actions"><button id="undo" disabled>撤回</button><button id="redo" disabled>重做</button><button id="clear" disabled>清空</button></div></section>
+<p class="hint">在画框内横向画出山脊，松手看墨水缓缓落下</p>
+</main><script>
+const canvas=document.getElementById('c'),frameEl=document.getElementById('frame'),ctx=canvas.getContext('2d'),slider=document.getElementById('opacity'),value=document.getElementById('value');
+const undoBtn=document.getElementById('undo'),redoBtn=document.getElementById('redo'),clearBtn=document.getElementById('clear');
+let W=0,H=0,D=1,mountains=[],undone=[],stroke=[],drawing=false,pointerId=null;
+function resize(){const r=frameEl.getBoundingClientRect();W=Math.max(1,r.width);H=Math.max(1,r.height);D=Math.min(devicePixelRatio||1,2);canvas.width=Math.round(W*D);canvas.height=Math.round(H*D);ctx.setTransform(D,0,0,D,0,0)}
+new ResizeObserver(resize).observe(frameEl);resize();
 slider.addEventListener('input',()=>value.textContent=slider.value+'%');
-function point(e){return{x:e.clientX,y:e.clientY}}
-c.addEventListener('pointerdown',e=>{drawing=true;stroke=[point(e)];c.setPointerCapture(e.pointerId)});
-c.addEventListener('pointermove',e=>{if(!drawing)return;const p=point(e),q=stroke[stroke.length-1];if(Math.hypot(p.x-q.x,p.y-q.y)>2)stroke.push(p)});
-function finish(){if(!drawing)return;drawing=false;let p=stroke.slice();stroke=[];if(p.length<3)return;if(p[0].x>p[p.length-1].x)p.reverse();
-// Each x position has a single ridge height; avoids self-intersecting mountain polygons.
-const bins=new Map();for(const v of p){const x=Math.round(v.x/2)*2;bins.set(x,Math.min(v.y,bins.has(x)?bins.get(x):v.y))}
-p=[...bins].sort((a,b)=>a[0]-b[0]).map(([x,y])=>({x,y}));
-if(p.length<3||p[p.length-1].x-p[0].x<24)return;
-mountains.push({p,opacity:Number(slider.value)/100,start:performance.now()})}
-c.addEventListener('pointerup',finish);c.addEventListener('pointercancel',finish);
-document.getElementById('undo').onclick=()=>mountains.pop();document.getElementById('clear').onclick=()=>{mountains=[];stroke=[];drawing=false};
-function trace(p){g.moveTo(p[0].x,p[0].y);for(let i=1;i<p.length;i++)g.lineTo(p[i].x,p[i].y)}
-function drawMountain(m,t){const p=m.p;const progress=Math.min(1,Math.max(0,(t-m.start)/2200));const bottom=-H+(2*H+80)*(1-Math.pow(1-progress,2));g.save();g.beginPath();trace(p);g.lineTo(p[p.length-1].x,H+40);g.lineTo(p[0].x,H+40);g.closePath();g.clip();g.fillStyle='#252623';g.globalAlpha=m.opacity;g.fillRect(p[0].x,0,p[p.length-1].x-p[0].x,Math.max(0,bottom));g.restore();g.beginPath();trace(p);g.strokeStyle='#20211f';g.globalAlpha=1;g.lineWidth=2.4;g.lineCap='round';g.lineJoin='round';g.stroke()}
-function frame(t){g.fillStyle='#f4f0e7';g.fillRect(0,0,W,H);for(const m of mountains)drawMountain(m,t);if(stroke.length>1){g.beginPath();trace(stroke);g.strokeStyle='#20211f';g.lineWidth=2.4;g.lineCap='round';g.lineJoin='round';g.stroke()}requestAnimationFrame(frame)}requestAnimationFrame(frame);
+function updateButtons(){undoBtn.disabled=mountains.length===0;redoBtn.disabled=undone.length===0;clearBtn.disabled=mountains.length===0}
+function point(e){const r=canvas.getBoundingClientRect();return{x:Math.max(0,Math.min(W,e.clientX-r.left)),y:Math.max(0,Math.min(H,e.clientY-r.top))}}
+canvas.addEventListener('pointerdown',e=>{if(drawing)return;drawing=true;pointerId=e.pointerId;stroke=[point(e)];canvas.setPointerCapture(e.pointerId)});
+canvas.addEventListener('pointermove',e=>{if(!drawing||e.pointerId!==pointerId)return;const p=point(e),q=stroke[stroke.length-1];if(Math.hypot(p.x-q.x,p.y-q.y)>1.5)stroke.push(p)});
+function finish(e){if(!drawing||e.pointerId!==pointerId)return;drawing=false;pointerId=null;let p=stroke.slice();stroke=[];if(p.length<3)return;if(p[0].x>p[p.length-1].x)p.reverse();const bins=new Map();for(const v of p){const x=Math.round(v.x/2)*2;bins.set(x,Math.min(v.y,bins.has(x)?bins.get(x):v.y))}
+p=[...bins].sort((a,b)=>a[0]-b[0]).map(([x,y])=>({x,y}));if(p.length<3||p[p.length-1].x-p[0].x<24)return;
+mountains.push({p:p.map(v=>({x:v.x/W,y:v.y/H})),opacity:Number(slider.value)/100,start:performance.now()});undone=[];updateButtons()}
+canvas.addEventListener('pointerup',finish);canvas.addEventListener('pointercancel',e=>{if(e.pointerId===pointerId){drawing=false;pointerId=null;stroke=[]}});
+undoBtn.onclick=()=>{if(mountains.length){undone.push(mountains.pop());updateButtons()}};
+redoBtn.onclick=()=>{if(undone.length){mountains.push(undone.pop());updateButtons()}};
+clearBtn.onclick=()=>{mountains=[];undone=[];stroke=[];drawing=false;updateButtons()};
+function trace(p){ctx.moveTo(p[0].x,p[0].y);for(let i=1;i<p.length;i++)ctx.lineTo(p[i].x,p[i].y)}
+function drawMountain(m,t){const p=m.p.map(v=>({x:v.x*W,y:v.y*H}));const progress=Math.min(1,Math.max(0,(t-m.start)/2300));const reveal=H*(1-Math.pow(1-progress,2.4));ctx.save();ctx.beginPath();trace(p);ctx.lineTo(p[p.length-1].x,H+1);ctx.lineTo(p[0].x,H+1);ctx.closePath();ctx.clip();ctx.globalAlpha=m.opacity;ctx.fillStyle='#252623';ctx.fillRect(0,0,W,reveal);ctx.restore();ctx.beginPath();trace(p);ctx.globalAlpha=1;ctx.strokeStyle='#20211f';ctx.lineWidth=2.5;ctx.lineCap='round';ctx.lineJoin='round';ctx.stroke()}
+function render(t){ctx.fillStyle='#f7f4eb';ctx.fillRect(0,0,W,H);for(const m of mountains)drawMountain(m,t);if(stroke.length>1){ctx.beginPath();trace(stroke);ctx.strokeStyle='#20211f';ctx.lineWidth=2.5;ctx.lineJoin='round';ctx.lineCap='round';ctx.stroke()}requestAnimationFrame(render)}requestAnimationFrame(render);
 </script></body></html>
