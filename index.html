@@ -37,8 +37,7 @@ function updateEditor(){
  for(const s of ordered()){
   const b=document.createElement('button');b.type='button';b.className='gradient-stop'+(s.id===selected?' selected':'');
   b.style.left=s.pos+'%';b.setAttribute('aria-label','控制点 '+s.pos+'% 浓度 '+s.alpha+'%');
-  b.addEventListener('pointerdown',e=>{e.stopPropagation();selected=s.id;updateEditor();b.setPointerCapture(e.pointerId)});
-  b.addEventListener('pointermove',e=>{if(e.buttons!==1)return;const r=gradientBar.getBoundingClientRect();s.pos=Math.round(Math.max(0,Math.min(100,(e.clientX-r.left)/r.width*100)));selected=s.id;updateEditor()});
+  b.addEventListener('pointerdown',e=>{e.stopPropagation();selected=s.id;gradientBar.setPointerCapture(e.pointerId);updateEditor()});
   gradientBar.appendChild(b);
  }
 }
@@ -47,6 +46,7 @@ alphaSlider.addEventListener('input',()=>{selectedStop().alpha=+alphaSlider.valu
 document.getElementById('addStop').onclick=()=>{if(stops.length>=8)return;const p=Math.min(100,selectedStop().pos+10);const id=nextId++;stops.push({id,pos:p,alpha:50});selected=id;updateEditor()};
 document.getElementById('removeStop').onclick=()=>{if(stops.length<=2)return;stops=stops.filter(s=>s.id!==selected);selected=stops[0].id;updateEditor()};
 document.getElementById('resetGradient').onclick=()=>{stops=defaultStops.map(s=>({...s}));selected=2;updateEditor()};
+gradientBar.addEventListener('pointermove',e=>{if(!gradientBar.hasPointerCapture(e.pointerId))return;const r=gradientBar.getBoundingClientRect();selectedStop().pos=Math.round(Math.max(0,Math.min(100,(e.clientX-r.left)/r.width*100)));updateEditor()});
 gradientBar.addEventListener('click',e=>{if(e.target!==gradientBar)return;const r=gradientBar.getBoundingClientRect();const p=(e.clientX-r.left)/r.width*100;selected=ordered().reduce((a,b)=>Math.abs(b.pos-p)<Math.abs(a.pos-p)?b:a).id;updateEditor()});
 updateEditor();
 const undoBtn=document.getElementById('undo'),redoBtn=document.getElementById('redo'),clearBtn=document.getElementById('clear');
