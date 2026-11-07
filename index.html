@@ -18,7 +18,7 @@ button{border:1px solid #aaa69c;background:#f7f4eb;border-radius:8px;color:#2425
 <header><h1>一笔成山</h1><p>以线为脊 · 墨落成峦</p></header>
 <div class="frame" id="frame"><canvas id="c"></canvas></div>
 <section class="panel"><div class="brush-switch" role="group" aria-label="画笔模式"><button id="lineBrush" class="active" aria-pressed="true">线成山</button><button id="peakBrush" aria-pressed="false">峰成山</button></div><label><span>墨色浓度</span><output id="alphaValue">50%</output></label><div id="gradientBar" class="gradient-bar" aria-label="墨色预览"></div><div class="editor-row"><span>淡</span><input id="stopAlpha" aria-label="墨色浓度" type="range" min="0" max="100" step="1" value="50"><span>浓</span></div><div class="actions"><button id="undo" disabled>撤回</button><button id="redo" disabled>重做</button><button id="clear" disabled>清空</button></div></section>
-<p class="hint">随笔成山 · 峰隐云间</p>
+<p class="hint">随笔成山 · 起落皆成峰</p>
 </main><script>
 const canvas=document.getElementById('c'),frameEl=document.getElementById('frame'),ctx=canvas.getContext('2d');
 const gradientBar=document.getElementById('gradientBar'),alphaSlider=document.getElementById('stopAlpha');
@@ -58,35 +58,12 @@ function sweeps(points){
  if(last.length>1&&Math.abs(last.at(-1).x-last[0].x)>5)result.push(last);
  return result;
 }
-// Peak brush: extend the two ends into low, soft shoulders without replacing the user's peaks.
-function peakPath(raw){
- if(raw.length<2)return raw;
- const ordered=raw.slice().sort((a,b)=>a.x-b.x);
- const left=ordered[0],right=ordered[ordered.length-1];
- const span=right.x-left.x;
- if(span<8)return raw;
- // Use the upper envelope of the gesture. A peak stays where the finger made it.
- const samples=[];const n=Math.max(12,Math.ceil(span/3));
- for(let i=0;i<=n;i++){
-  const x=left.x+span*i/n;let best=Infinity;
-  for(let j=1;j<raw.length;j++){
-   const a=raw[j-1],b=raw[j],lo=Math.min(a.x,b.x),hi=Math.max(a.x,b.x);
-   if(x<lo||x>hi||hi-lo<.001)continue;
-   const y=a.y+(b.y-a.y)*(x-a.x)/(b.x-a.x);
-   best=Math.min(best,y);
-  }
-  if(Number.isFinite(best))samples.push({x,y:best});
- }
- if(samples.length<2)return raw;
- const first=samples[0],last=samples[samples.length-1];
- const shoulder=Math.min(W*.18,Math.max(22,span*.27));
- const fall=Math.min(H*.15,Math.max(10,span*.16));
- const ease=u=>u*u*(3-2*u);
- const result=[];
- for(let i=0;i<=12;i++){const u=i/12;result.push({x:Math.max(0,first.x-shoulder*(1-u)),y:Math.min(H,first.y+fall*(1-ease(u)))});}
- result.push(...samples);
- for(let i=1;i<=12;i++){const u=i/12;result.push({x:Math.min(W,last.x+shoulder*u),y:Math.min(H,last.y+fall*ease(u))});}
- return result;
+// Peak brush keeps the actual gesture. Its first/last segments are ink-light,
+// and the flowing body tapers with the same distance-based strength.
+function peakEnvelope(points){
+ const d=[0];for(let i=1;i<points.length;i++)d.push(d[i-1]+Math.hypot(points[i].x-points[i-1].x,points[i].y-points[i-1].y));
+ const total=d.at(-1)||1,soft=Math.min(100,Math.max(22,total*.23));
+ return d.map(v=>{const a=Math.min(1,v/soft,(total-v)/soft);const t=Math.max(0,a);return t*t*(3-2*t)});
 }
 function finish(e){
  if(!drawing||e.pointerId!==pointerId)return;
@@ -94,10 +71,13 @@ function finish(e){
  const raw=stroke.slice();stroke=[];
  if(raw.length<2)return;
  const peak=brushMode==='peak';
- const source=peak?peakPath(raw):raw;
- const layers=(peak?[source]:sweeps(raw)).map(part=>part.map(v=>({x:v.x/W,y:v.y/H})));
+ const source=raw;
+ const parts=sweeps(raw);
+ const layers=parts.map(part=>part.map(v=>({x:v.x/W,y:v.y/H})));
+ const layerWeights=peak?parts.map(part=>peakEnvelope(part)):null;
+ const ridgeWeights=peak?peakEnvelope(raw):null;
  if(!layers.length)return;
- mountains.push({p:source.map(v=>({x:v.x/W,y:v.y/H})),layers,peak,ink:inkStrength(),seed:mountains.length*1.83+raw[0].x*.037+raw[0].y*.021,start:performance.now()});
+ mountains.push({p:source.map(v=>({x:v.x/W,y:v.y/H})),layers,layerWeights,ridgeWeights,peak,ink:inkStrength(),seed:mountains.length*1.83+raw[0].x*.037+raw[0].y*.021,start:performance.now()});
  undone=[];updateButtons();
 }
 canvas.addEventListener('pointerup',finish);canvas.addEventListener('pointercancel',e=>{if(e.pointerId===pointerId){drawing=false;pointerId=null;stroke=[]}});
@@ -112,12 +92,13 @@ function gradientAlpha(gradient,percent){
  for(let i=1;i<gradient.length;i++){const a=gradient[i-1],b=gradient[i];if(percent<=b.pos){const t=b.pos===a.pos?1:(percent-a.pos)/(b.pos-a.pos);return (a.alpha+(b.alpha-a.alpha)*t)/100}}
  return gradient[gradient.length-1].alpha/100;
 }
-function buildLayer(layer,ink,peak=false){
+function buildLayer(layer,ink,peak=false,weights=null){
  const off=document.createElement('canvas');
  off.width=Math.ceil(W);off.height=Math.ceil(H);
  const og=off.getContext('2d');
  const pixels=og.createImageData(off.width,off.height);
  const ridge=new Float32Array(off.width);ridge.fill(Infinity);
+ const strength=new Float32Array(off.width);
  const pts=layer.map(v=>({x:v.x*W,y:v.y*H}));
  for(let i=1;i<pts.length;i++){
   const a=pts[i-1],b=pts[i],dx=b.x-a.x;
@@ -127,7 +108,7 @@ function buildLayer(layer,ink,peak=false){
   for(let x=lo;x<=hi;x++){
    const t=Math.max(0,Math.min(1,(x+0.5-a.x)/dx));
    const y=a.y+(b.y-a.y)*t;
-   ridge[x]=Math.min(ridge[x],y);
+   if(y<ridge[x]){ridge[x]=y;strength[x]=peak&&weights?weights[i-1]+(weights[i]-weights[i-1])*t:1;}
   }
  }
  const fade=flowLength(ink,H);
@@ -137,15 +118,14 @@ function buildLayer(layer,ink,peak=false){
   const top=ridge[x];if(!Number.isFinite(top))continue;
   for(let y=Math.max(0,Math.floor(top));y<Math.min(off.height,Math.ceil(top+fade));y++){
    const dist=Math.max(0,(y+.5-top)/fade);
-   const edge=peak?Math.min(1,Math.max(0,(x-xStart)/feather),Math.max(0,(xEnd-x)/feather)):1;
-   const taper=peak?edge*edge*(3-2*edge):1;
+   const taper=peak?strength[x]:1;
    const alpha=Math.round(255*ink*taper*Math.pow(Math.max(0,1-dist),1.35));
    const k=(y*off.width+x)*4;
    pixels.data[k]=37;pixels.data[k+1]=38;pixels.data[k+2]=35;pixels.data[k+3]=alpha;
   }
  }
  og.putImageData(pixels,0,0);
- return {off,ridge,fade,xStart,xEnd,feather};
+ return {off,ridge,fade,xStart,xEnd,feather,strength};
 }
 // Stable, gently uneven ink front. Each column begins at its own ridge height.
 function frontAt(item,x,progress,seed){
@@ -156,7 +136,8 @@ function frontAt(item,x,progress,seed){
  const local=Math.max(0,Math.min(1,(progress-delay)/(1-delay)));
  const eased=local*local*(3-2*local);
  const flutter=Math.sin(x*.038+seed)*9+Math.sin(x*.097+seed*2)*4;
- return Math.min(H,top+Math.max(0,item.fade*eased+flutter*Math.sin(Math.PI*local)));
+ const taper=item.strength[Math.max(0,Math.min(item.strength.length-1,Math.floor(x)))];
+ return Math.min(H,top+Math.max(0,(item.fade*eased+flutter*Math.sin(Math.PI*local))*taper));
 }
 function clipInkFront(item,progress,seed){
  ctx.beginPath();
@@ -176,7 +157,7 @@ function clipInkFront(item,progress,seed){
 }
 function drawMountain(m,t){
  if(!m.cache||m.cacheW!==Math.ceil(W)||m.cacheH!==Math.ceil(H)){
-  m.cache=m.layers.map(layer=>buildLayer(layer,m.ink,m.peak));m.cacheW=Math.ceil(W);m.cacheH=Math.ceil(H);
+  m.cache=m.layers.map((layer,i)=>buildLayer(layer,m.ink,m.peak,m.layerWeights?.[i]));m.cacheW=Math.ceil(W);m.cacheH=Math.ceil(H);
  }
  const progress=Math.min(1,Math.max(0,(t-m.start-180)/3000));
  for(let li=0;li<m.cache.length;li++){
@@ -204,9 +185,9 @@ function drawMountain(m,t){
   for(let x=3+((li*2.3)%step);x<W;x+=step){
    const top=item.ridge[Math.floor(x)];if(!Number.isFinite(top))continue;
    const variation=.55+.45*Math.sin(x*.31+li*2.7);
-   const len=Math.min(item.fade*(.25+.45*variation),H-top);
+   const len=Math.min(item.fade*(.25+.45*variation)*(m.peak?item.strength[Math.floor(x)]:1),H-top);
    if(len<=0)continue;
-   if(m.peak&&Math.min((x-item.xStart)/item.feather,(item.xEnd-x)/item.feather)<.5)continue;
+   if(m.peak&&item.strength[Math.floor(x)]<.45)continue;
    ctx.beginPath();ctx.moveTo(x,top+2);ctx.lineTo(x,top+len);ctx.stroke();
   }
   ctx.restore();
@@ -232,7 +213,7 @@ function wetRidge(m,t){
    const q=(k+.5)/steps,x=a.x+dx*q,y=a.y+dy*q;
    const n=Math.sin(x*.052+m.seed*2.7)*.5+Math.sin(x*.117+m.seed)*.3+Math.sin(x*.023+m.seed*3.1)*.2;
    const localAge=Math.max(0,Math.min(1,(age-Math.max(0,n)*.16)/(.95-Math.max(0,n)*.16)));
-   const edge=m.peak?Math.max(0,Math.min(1,(x-p[0].x)/Math.max(20,(p.at(-1).x-p[0].x)*.23),(p.at(-1).x-x)/Math.max(20,(p.at(-1).x-p[0].x)*.23))):1;
+   const edge=m.peak?(m.ridgeWeights?.[Math.min(p.length-1,i-1)]??1):1;
    const depth=localAge*(1+Math.max(0,n)*10)*Math.min(1,m.ink*1.4)*edge;
    if(depth<=0)continue;
    ctx.strokeStyle='rgba(36,37,34,'+(m.ink*edge*(.07+.07*Math.max(0,n)))+')';
@@ -250,7 +231,7 @@ function wetRidge(m,t){
  const finalRidge=Math.min(1,baseInk+.05);
  const settle=age*age*(3-2*age);
  ctx.save();ctx.strokeStyle='#242521';ctx.lineCap='round';ctx.lineJoin='round';ctx.lineWidth=1.45;
- if(m.peak){for(let i=1;i<p.length;i++){const x=(p[i-1].x+p[i].x)/2,range=p.at(-1).x-p[0].x,edge=Math.max(0,Math.min(1,(x-p[0].x)/Math.max(20,range*.23),(p.at(-1).x-x)/Math.max(20,range*.23)));ctx.globalAlpha=(1-(1-finalRidge)*settle)*edge*edge*(3-2*edge);ctx.beginPath();ctx.moveTo(p[i-1].x,p[i-1].y);ctx.lineTo(p[i].x,p[i].y);ctx.stroke()}}else{ctx.beginPath();trace(p);ctx.globalAlpha=1-(1-finalRidge)*settle;ctx.stroke()}ctx.restore();
+ if(m.peak){for(let i=1;i<p.length;i++){const edge=((m.ridgeWeights?.[i-1]??1)+(m.ridgeWeights?.[i]??1))*.5;ctx.globalAlpha=(1-(1-finalRidge)*settle)*edge;ctx.beginPath();ctx.moveTo(p[i-1].x,p[i-1].y);ctx.lineTo(p[i].x,p[i].y);ctx.stroke()}}else{ctx.beginPath();trace(p);ctx.globalAlpha=1-(1-finalRidge)*settle;ctx.stroke()}ctx.restore();
 }
 function render(t){
  ctx.fillStyle='#f7f4eb';ctx.fillRect(0,0,W,H);
