@@ -11,14 +11,14 @@ label{display:flex;justify-content:space-between;align-items:center;font-size:14
 input[type=range]{display:block;width:100%;accent-color:#262724;touch-action:auto}
 .gradient-bar{height:28px;border:1px solid #b6b0a3;border-radius:5px;margin:8px 0 15px;background:#f7f4eb}.editor-row{display:flex;align-items:center;gap:10px;margin-top:12px;font-size:13px}.editor-row span{min-width:64px}.editor-row input{flex:1;min-width:0}.editor-row output{width:42px;text-align:right}.actions{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:17px}
 button{border:1px solid #aaa69c;background:#f7f4eb;border-radius:8px;color:#242522;padding:12px 4px;font-size:14px}
-button:disabled{opacity:.35}button:active:not(:disabled){background:#e4e0d5}
+ .brush-switch{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:15px}.brush-switch button{padding:9px 4px;border-radius:7px}.brush-switch button.active{background:#dedbd1;border-color:#77766e;font-weight:600}button:disabled{opacity:.35}button:active:not(:disabled){background:#e4e0d5}
 .hint{text-align:center;font-size:12px;color:#89857b;margin:0;flex-shrink:0}
 @media(min-width:700px){main{padding-top:34px;padding-bottom:30px}.frame{max-height:66dvh;min-height:380px}}
 </style></head><body><main>
 <header><h1>一笔成山</h1><p>以线为脊 · 墨落成峦</p></header>
 <div class="frame" id="frame"><canvas id="c"></canvas></div>
-<section class="panel"><label><span>墨色浓度</span><output id="alphaValue">50%</output></label><div id="gradientBar" class="gradient-bar" aria-label="墨色预览"></div><div class="editor-row"><span>淡</span><input id="stopAlpha" aria-label="墨色浓度" type="range" min="0" max="100" step="1" value="50"><span>浓</span></div><div class="actions"><button id="undo" disabled>撤回</button><button id="redo" disabled>重做</button><button id="clear" disabled>清空</button></div></section>
-<p class="hint">一笔一浓淡 · 墨色自然成山</p>
+<section class="panel"><div class="brush-switch" role="group" aria-label="画笔模式"><button id="lineBrush" class="active" aria-pressed="true">线成山</button><button id="peakBrush" aria-pressed="false">峰成山</button></div><label><span>墨色浓度</span><output id="alphaValue">50%</output></label><div id="gradientBar" class="gradient-bar" aria-label="墨色预览"></div><div class="editor-row"><span>淡</span><input id="stopAlpha" aria-label="墨色浓度" type="range" min="0" max="100" step="1" value="50"><span>浓</span></div><div class="actions"><button id="undo" disabled>撤回</button><button id="redo" disabled>重做</button><button id="clear" disabled>清空</button></div></section>
+<p class="hint">随笔成山 · 峰隐云间</p>
 </main><script>
 const canvas=document.getElementById('c'),frameEl=document.getElementById('frame'),ctx=canvas.getContext('2d');
 const gradientBar=document.getElementById('gradientBar'),alphaSlider=document.getElementById('stopAlpha');
@@ -30,6 +30,7 @@ function updateEditor(){
  gradientBar.style.background='linear-gradient(to right,rgba(37,38,35,'+ink+'),rgba(37,38,35,0))';
 }
 alphaSlider.addEventListener('input',updateEditor);updateEditor();
+let brushMode='line';const lineBrush=document.getElementById('lineBrush'),peakBrush=document.getElementById('peakBrush');function setBrush(mode){brushMode=mode;lineBrush.classList.toggle('active',mode==='line');peakBrush.classList.toggle('active',mode==='peak');lineBrush.setAttribute('aria-pressed',mode==='line');peakBrush.setAttribute('aria-pressed',mode==='peak')}lineBrush.onclick=()=>setBrush('line');peakBrush.onclick=()=>setBrush('peak');
 const undoBtn=document.getElementById('undo'),redoBtn=document.getElementById('redo'),clearBtn=document.getElementById('clear');
 let W=0,H=0,D=1,mountains=[],undone=[],stroke=[],drawing=false,pointerId=null;
 function resize(){const r=frameEl.getBoundingClientRect();W=Math.max(1,r.width);H=Math.max(1,r.height);D=Math.min(devicePixelRatio||1,2);canvas.width=Math.round(W*D);canvas.height=Math.round(H*D);ctx.setTransform(D,0,0,D,0,0)}
@@ -57,14 +58,46 @@ function sweeps(points){
  if(last.length>1&&Math.abs(last.at(-1).x-last[0].x)>5)result.push(last);
  return result;
 }
+// Peak brush: extend the two ends into low, soft shoulders without replacing the user's peaks.
+function peakPath(raw){
+ if(raw.length<2)return raw;
+ const ordered=raw.slice().sort((a,b)=>a.x-b.x);
+ const left=ordered[0],right=ordered[ordered.length-1];
+ const span=right.x-left.x;
+ if(span<8)return raw;
+ // Use the upper envelope of the gesture. A peak stays where the finger made it.
+ const samples=[];const n=Math.max(12,Math.ceil(span/3));
+ for(let i=0;i<=n;i++){
+  const x=left.x+span*i/n;let best=Infinity;
+  for(let j=1;j<raw.length;j++){
+   const a=raw[j-1],b=raw[j],lo=Math.min(a.x,b.x),hi=Math.max(a.x,b.x);
+   if(x<lo||x>hi||hi-lo<.001)continue;
+   const y=a.y+(b.y-a.y)*(x-a.x)/(b.x-a.x);
+   best=Math.min(best,y);
+  }
+  if(Number.isFinite(best))samples.push({x,y:best});
+ }
+ if(samples.length<2)return raw;
+ const first=samples[0],last=samples[samples.length-1];
+ const shoulder=Math.min(W*.18,Math.max(22,span*.27));
+ const fall=Math.min(H*.15,Math.max(10,span*.16));
+ const ease=u=>u*u*(3-2*u);
+ const result=[];
+ for(let i=0;i<=12;i++){const u=i/12;result.push({x:Math.max(0,first.x-shoulder*(1-u)),y:Math.min(H,first.y+fall*(1-ease(u)))});}
+ result.push(...samples);
+ for(let i=1;i<=12;i++){const u=i/12;result.push({x:Math.min(W,last.x+shoulder*u),y:Math.min(H,last.y+fall*ease(u))});}
+ return result;
+}
 function finish(e){
  if(!drawing||e.pointerId!==pointerId)return;
  drawing=false;pointerId=null;
  const raw=stroke.slice();stroke=[];
  if(raw.length<2)return;
- const layers=sweeps(raw).map(part=>part.map(v=>({x:v.x/W,y:v.y/H})));
+ const peak=brushMode==='peak';
+ const source=peak?peakPath(raw):raw;
+ const layers=(peak?[source]:sweeps(raw)).map(part=>part.map(v=>({x:v.x/W,y:v.y/H})));
  if(!layers.length)return;
- mountains.push({p:raw.map(v=>({x:v.x/W,y:v.y/H})),layers,ink:inkStrength(),seed:mountains.length*1.83+raw[0].x*.037+raw[0].y*.021,start:performance.now()});
+ mountains.push({p:source.map(v=>({x:v.x/W,y:v.y/H})),layers,peak,ink:inkStrength(),seed:mountains.length*1.83+raw[0].x*.037+raw[0].y*.021,start:performance.now()});
  undone=[];updateButtons();
 }
 canvas.addEventListener('pointerup',finish);canvas.addEventListener('pointercancel',e=>{if(e.pointerId===pointerId){drawing=false;pointerId=null;stroke=[]}});
@@ -79,7 +112,7 @@ function gradientAlpha(gradient,percent){
  for(let i=1;i<gradient.length;i++){const a=gradient[i-1],b=gradient[i];if(percent<=b.pos){const t=b.pos===a.pos?1:(percent-a.pos)/(b.pos-a.pos);return (a.alpha+(b.alpha-a.alpha)*t)/100}}
  return gradient[gradient.length-1].alpha/100;
 }
-function buildLayer(layer,ink){
+function buildLayer(layer,ink,peak=false){
  const off=document.createElement('canvas');
  off.width=Math.ceil(W);off.height=Math.ceil(H);
  const og=off.getContext('2d');
@@ -98,17 +131,21 @@ function buildLayer(layer,ink){
   }
  }
  const fade=flowLength(ink,H);
+ const xStart=Math.min(...pts.map(p=>p.x)),xEnd=Math.max(...pts.map(p=>p.x));
+ const feather=Math.min(65,Math.max(18,(xEnd-xStart)*.23));
  for(let x=0;x<off.width;x++){
   const top=ridge[x];if(!Number.isFinite(top))continue;
   for(let y=Math.max(0,Math.floor(top));y<Math.min(off.height,Math.ceil(top+fade));y++){
    const dist=Math.max(0,(y+.5-top)/fade);
-   const alpha=Math.round(255*ink*Math.pow(Math.max(0,1-dist),1.35));
+   const edge=peak?Math.min(1,Math.max(0,(x-xStart)/feather),Math.max(0,(xEnd-x)/feather)):1;
+   const taper=peak?edge*edge*(3-2*edge):1;
+   const alpha=Math.round(255*ink*taper*Math.pow(Math.max(0,1-dist),1.35));
    const k=(y*off.width+x)*4;
    pixels.data[k]=37;pixels.data[k+1]=38;pixels.data[k+2]=35;pixels.data[k+3]=alpha;
   }
  }
  og.putImageData(pixels,0,0);
- return {off,ridge,fade};
+ return {off,ridge,fade,xStart,xEnd,feather};
 }
 // Stable, gently uneven ink front. Each column begins at its own ridge height.
 function frontAt(item,x,progress,seed){
@@ -139,7 +176,7 @@ function clipInkFront(item,progress,seed){
 }
 function drawMountain(m,t){
  if(!m.cache||m.cacheW!==Math.ceil(W)||m.cacheH!==Math.ceil(H)){
-  m.cache=m.layers.map(layer=>buildLayer(layer,m.ink));m.cacheW=Math.ceil(W);m.cacheH=Math.ceil(H);
+  m.cache=m.layers.map(layer=>buildLayer(layer,m.ink,m.peak));m.cacheW=Math.ceil(W);m.cacheH=Math.ceil(H);
  }
  const progress=Math.min(1,Math.max(0,(t-m.start-180)/3000));
  for(let li=0;li<m.cache.length;li++){
@@ -162,13 +199,14 @@ function drawMountain(m,t){
   }
   // Keep the existing independent fine vertical ink grain.
   ctx.strokeStyle='#252623';ctx.lineWidth=.65;
-  ctx.globalAlpha=Math.min(.065,m.ink*.085)*Math.min(1,progress*1.5);
-  const step=12.5;
+  ctx.globalAlpha=Math.min(.065,m.ink*.085)*Math.min(1,progress*1.5)*(m.peak?.45:1);
+  const step=m.peak?20:12.5;
   for(let x=3+((li*2.3)%step);x<W;x+=step){
    const top=item.ridge[Math.floor(x)];if(!Number.isFinite(top))continue;
    const variation=.55+.45*Math.sin(x*.31+li*2.7);
    const len=Math.min(item.fade*(.25+.45*variation),H-top);
    if(len<=0)continue;
+   if(m.peak&&Math.min((x-item.xStart)/item.feather,(item.xEnd-x)/item.feather)<.5)continue;
    ctx.beginPath();ctx.moveTo(x,top+2);ctx.lineTo(x,top+len);ctx.stroke();
   }
   ctx.restore();
@@ -194,9 +232,10 @@ function wetRidge(m,t){
    const q=(k+.5)/steps,x=a.x+dx*q,y=a.y+dy*q;
    const n=Math.sin(x*.052+m.seed*2.7)*.5+Math.sin(x*.117+m.seed)*.3+Math.sin(x*.023+m.seed*3.1)*.2;
    const localAge=Math.max(0,Math.min(1,(age-Math.max(0,n)*.16)/(.95-Math.max(0,n)*.16)));
-   const depth=localAge*(1+Math.max(0,n)*10)*Math.min(1,m.ink*1.4);
+   const edge=m.peak?Math.max(0,Math.min(1,(x-p[0].x)/Math.max(20,(p.at(-1).x-p[0].x)*.23),(p.at(-1).x-x)/Math.max(20,(p.at(-1).x-p[0].x)*.23))):1;
+   const depth=localAge*(1+Math.max(0,n)*10)*Math.min(1,m.ink*1.4)*edge;
    if(depth<=0)continue;
-   ctx.strokeStyle='rgba(36,37,34,'+(m.ink*(.07+.07*Math.max(0,n)))+')';
+   ctx.strokeStyle='rgba(36,37,34,'+(m.ink*edge*(.07+.07*Math.max(0,n)))+')';
    ctx.lineWidth=1.8+localAge*2.4;
    ctx.beginPath();ctx.moveTo(x,y+.5);ctx.lineTo(x,y+depth);ctx.stroke();
   }
@@ -210,9 +249,8 @@ function wetRidge(m,t){
  const baseInk=m.ink;
  const finalRidge=Math.min(1,baseInk+.05);
  const settle=age*age*(3-2*age);
- ctx.save();ctx.beginPath();trace(p);ctx.strokeStyle='#242521';
- ctx.globalAlpha=1-(1-finalRidge)*settle;
- ctx.lineWidth=1.45;ctx.lineCap='round';ctx.lineJoin='round';ctx.stroke();ctx.restore();
+ ctx.save();ctx.strokeStyle='#242521';ctx.lineCap='round';ctx.lineJoin='round';ctx.lineWidth=1.45;
+ if(m.peak){for(let i=1;i<p.length;i++){const x=(p[i-1].x+p[i].x)/2,range=p.at(-1).x-p[0].x,edge=Math.max(0,Math.min(1,(x-p[0].x)/Math.max(20,range*.23),(p.at(-1).x-x)/Math.max(20,range*.23)));ctx.globalAlpha=(1-(1-finalRidge)*settle)*edge*edge*(3-2*edge);ctx.beginPath();ctx.moveTo(p[i-1].x,p[i-1].y);ctx.lineTo(p[i].x,p[i].y);ctx.stroke()}}else{ctx.beginPath();trace(p);ctx.globalAlpha=1-(1-finalRidge)*settle;ctx.stroke()}ctx.restore();
 }
 function render(t){
  ctx.fillStyle='#f7f4eb';ctx.fillRect(0,0,W,H);
