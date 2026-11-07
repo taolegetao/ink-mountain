@@ -85,7 +85,9 @@ function drawMountain(m,t){
     gradient.addColorStop(0,'rgba(37,38,35,'+m.opacity+')');
     gradient.addColorStop(1,'rgba(37,38,35,0)');
     ctx.fillStyle=gradient;
-    ctx.fillRect(x,ridge,1,end-ridge);
+    // Slight horizontal overlap prevents hairline gaps from subpixel rasterization.
+    // Each column is still rendered once per sweep, preserving fine ink striations.
+    ctx.fillRect(x-0.4,ridge,1.8,end-ridge);
    }
   }
  }
