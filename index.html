@@ -9,7 +9,7 @@ canvas{width:100%;height:100%;display:block;touch-action:none}
 .panel{flex-shrink:0;padding:16px 18px 14px;background:#f7f4eb;border:1px solid #d4cec0;border-radius:12px}
 label{display:flex;justify-content:space-between;align-items:center;font-size:14px;margin-bottom:11px}output{font-variant-numeric:tabular-nums}
 input[type=range]{display:block;width:100%;accent-color:#262724;touch-action:auto}
-.gradient-bar{position:relative;height:34px;border:1px solid #b6b0a3;border-radius:5px;margin:9px 9px 24px;background:#f7f4eb;touch-action:none}.gradient-stop{position:absolute;top:100%;width:20px;height:20px;transform:translate(-50%,-2px);border:2px solid #383934;background:#faf7f0;border-radius:50%;touch-action:none;cursor:grab}.gradient-stop.selected{background:#292a28;border:3px solid #f7f4eb;box-shadow:0 0 0 2px #292a28}.editor-row{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-top:12px;font-size:12px}.editor-row input{flex:1;min-width:0}.editor-row output{width:38px;text-align:right}.editor-actions{display:flex;gap:8px;margin-top:12px}.editor-actions button{flex:1;padding:8px 5px;font-size:12px}.actions{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:17px}
+.gradient-bar{height:28px;border:1px solid #b6b0a3;border-radius:5px;margin:8px 0 15px;background:#f7f4eb}.editor-row{display:flex;align-items:center;gap:10px;margin-top:12px;font-size:13px}.editor-row span{min-width:64px}.editor-row input{flex:1;min-width:0}.editor-row output{width:42px;text-align:right}.actions{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:17px}
 button{border:1px solid #aaa69c;background:#f7f4eb;border-radius:8px;color:#242522;padding:12px 4px;font-size:14px}
 button:disabled{opacity:.35}button:active:not(:disabled){background:#e4e0d5}
 .hint{text-align:center;font-size:12px;color:#89857b;margin:0;flex-shrink:0}
@@ -17,37 +17,19 @@ button:disabled{opacity:.35}button:active:not(:disabled){background:#e4e0d5}
 </style></head><body><main>
 <header><h1>一笔成山</h1><p>以线为脊 · 墨落成峦</p></header>
 <div class="frame" id="frame"><canvas id="c"></canvas></div>
-<section class="panel"><label><span>墨色渐变编辑器</span><span id="stopCount">3 个控制点</span></label><div id="gradientBar" class="gradient-bar" aria-label="墨色渐变条"></div><div class="editor-row"><span>位置</span><input id="stopPos" aria-label="控制点位置" type="range" min="0" max="100" step="1"><output id="posValue"></output></div><div class="editor-row"><span>浓度</span><input id="stopAlpha" aria-label="控制点浓度" type="range" min="0" max="100" step="1"><output id="alphaValue"></output></div><div class="editor-actions"><button id="addStop">＋ 添加控制点</button><button id="removeStop">－ 删除控制点</button><button id="resetGradient">恢复默认</button></div><div class="actions"><button id="undo" disabled>撤回</button><button id="redo" disabled>重做</button><button id="clear" disabled>清空</button></div></section>
-<p class="hint">调节渐变控制点，再画山 · 交叉笔迹自然积墨</p>
+<section class="panel"><label><span>墨色渐变</span><span>浓 → 淡</span></label><div id="gradientBar" class="gradient-bar" aria-label="墨色渐变预览"></div><div class="editor-row"><span>墨色浓度</span><input id="stopAlpha" aria-label="山脊墨色浓度" type="range" min="0" max="100" step="1" value="70"><output id="alphaValue">70%</output></div><div class="editor-row"><span>渐淡位置</span><input id="stopPos" aria-label="渐淡结束位置" type="range" min="5" max="100" step="1" value="100"><output id="posValue">100%</output></div><div class="actions"><button id="undo" disabled>撤回</button><button id="redo" disabled>重做</button><button id="clear" disabled>清空</button></div></section>
+<p class="hint">调节墨色与渐淡距离，再画山 · 交叉笔迹自然积墨</p>
 </main><script>
 const canvas=document.getElementById('c'),frameEl=document.getElementById('frame'),ctx=canvas.getContext('2d');
 const gradientBar=document.getElementById('gradientBar'),posSlider=document.getElementById('stopPos'),alphaSlider=document.getElementById('stopAlpha');
-const defaultStops=[{id:1,pos:0,alpha:70},{id:2,pos:46,alpha:30},{id:3,pos:100,alpha:0}];
-let stops=defaultStops.map(s=>({...s})),selected=2,nextId=4;
-function ordered(){return [...stops].sort((a,b)=>a.pos-b.pos)}
-function selectedStop(){return stops.find(s=>s.id===selected)||stops[0]}
+function ordered(){return [{pos:0,alpha:+alphaSlider.value},{pos:+posSlider.value,alpha:0},{pos:100,alpha:0}]}
 function updateEditor(){
- const a=selectedStop();posSlider.value=a.pos;alphaSlider.value=a.alpha;
- document.getElementById('posValue').textContent=a.pos+'%';document.getElementById('alphaValue').textContent=a.alpha+'%';
- document.getElementById('stopCount').textContent=stops.length+' 个控制点';
- document.getElementById('removeStop').disabled=stops.length<=2;
- document.getElementById('addStop').disabled=stops.length>=8;
- gradientBar.style.background='linear-gradient(to right,'+ordered().map(s=>'rgba(37,38,35,'+(s.alpha/100)+') '+s.pos+'%').join(',')+')';
- gradientBar.replaceChildren();
- for(const s of ordered()){
-  const b=document.createElement('button');b.type='button';b.className='gradient-stop'+(s.id===selected?' selected':'');
-  b.style.left=s.pos+'%';b.setAttribute('aria-label','控制点 '+s.pos+'% 浓度 '+s.alpha+'%');
-  b.addEventListener('pointerdown',e=>{e.stopPropagation();selected=s.id;gradientBar.setPointerCapture(e.pointerId);updateEditor()});
-  gradientBar.appendChild(b);
- }
+ document.getElementById('posValue').textContent=posSlider.value+'%';
+ document.getElementById('alphaValue').textContent=alphaSlider.value+'%';
+ gradientBar.style.background='linear-gradient(to right,rgba(37,38,35,'+(+alphaSlider.value/100)+') 0%,rgba(37,38,35,0) '+posSlider.value+'%,rgba(37,38,35,0) 100%)';
 }
-posSlider.addEventListener('input',()=>{selectedStop().pos=+posSlider.value;updateEditor()});
-alphaSlider.addEventListener('input',()=>{selectedStop().alpha=+alphaSlider.value;updateEditor()});
-document.getElementById('addStop').onclick=()=>{if(stops.length>=8)return;const p=Math.min(100,selectedStop().pos+10);const id=nextId++;stops.push({id,pos:p,alpha:50});selected=id;updateEditor()};
-document.getElementById('removeStop').onclick=()=>{if(stops.length<=2)return;stops=stops.filter(s=>s.id!==selected);selected=stops[0].id;updateEditor()};
-document.getElementById('resetGradient').onclick=()=>{stops=defaultStops.map(s=>({...s}));selected=2;updateEditor()};
-gradientBar.addEventListener('pointermove',e=>{if(!gradientBar.hasPointerCapture(e.pointerId))return;const r=gradientBar.getBoundingClientRect();selectedStop().pos=Math.round(Math.max(0,Math.min(100,(e.clientX-r.left)/r.width*100)));updateEditor()});
-gradientBar.addEventListener('click',e=>{if(e.target!==gradientBar)return;const r=gradientBar.getBoundingClientRect();const p=(e.clientX-r.left)/r.width*100;selected=ordered().reduce((a,b)=>Math.abs(b.pos-p)<Math.abs(a.pos-p)?b:a).id;updateEditor()});
+posSlider.addEventListener('input',updateEditor);
+alphaSlider.addEventListener('input',updateEditor);
 updateEditor();
 const undoBtn=document.getElementById('undo'),redoBtn=document.getElementById('redo'),clearBtn=document.getElementById('clear');
 let W=0,H=0,D=1,mountains=[],undone=[],stroke=[],drawing=false,pointerId=null;
