@@ -18,7 +18,7 @@ button:disabled{opacity:.35}button:active:not(:disabled){background:#e4e0d5}
 <header><h1>一笔成山</h1><p>以线为脊 · 墨落成峦</p></header>
 <div class="frame" id="frame"><canvas id="c"></canvas></div>
 <section class="panel"><label for="opacity"><span>山体墨色透明度</span><output id="value">20%</output></label><input id="opacity" type="range" min="0" max="100" step="1" value="20"><div class="actions"><button id="undo" disabled>撤回</button><button id="redo" disabled>重做</button><button id="clear" disabled>清空</button></div></section>
-<p class="hint">在画框内横向画出山脊，松手看墨水缓缓落下</p>
+<p class="hint">试着画回环或交叉，观察墨色如何积叠</p>
 </main><script>
 const canvas=document.getElementById('c'),frameEl=document.getElementById('frame'),ctx=canvas.getContext('2d'),slider=document.getElementById('opacity'),value=document.getElementById('value');
 const undoBtn=document.getElementById('undo'),redoBtn=document.getElementById('redo'),clearBtn=document.getElementById('clear');
@@ -30,14 +30,51 @@ function updateButtons(){undoBtn.disabled=mountains.length===0;redoBtn.disabled=
 function point(e){const r=canvas.getBoundingClientRect();return{x:Math.max(0,Math.min(W,e.clientX-r.left)),y:Math.max(0,Math.min(H,e.clientY-r.top))}}
 canvas.addEventListener('pointerdown',e=>{if(drawing)return;drawing=true;pointerId=e.pointerId;stroke=[point(e)];canvas.setPointerCapture(e.pointerId)});
 canvas.addEventListener('pointermove',e=>{if(!drawing||e.pointerId!==pointerId)return;const p=point(e),q=stroke[stroke.length-1];if(Math.hypot(p.x-q.x,p.y-q.y)>1.5)stroke.push(p)});
-function finish(e){if(!drawing||e.pointerId!==pointerId)return;drawing=false;pointerId=null;let p=stroke.slice();stroke=[];if(p.length<3)return;if(p[0].x>p[p.length-1].x)p.reverse();const bins=new Map();for(const v of p){const x=Math.round(v.x/2)*2;bins.set(x,Math.min(v.y,bins.has(x)?bins.get(x):v.y))}
-p=[...bins].sort((a,b)=>a[0]-b[0]).map(([x,y])=>({x,y}));if(p.length<3||p[p.length-1].x-p[0].x<24)return;
-mountains.push({p:p.map(v=>({x:v.x/W,y:v.y/H})),opacity:Number(slider.value)/100,start:performance.now()});undone=[];updateButtons()}
+// Split a continuous stroke into directional sweeps. Each sweep deposits one ink layer.
+function sweeps(points){
+ const result=[];if(points.length<2)return result;
+ let start=0,dir=0,extreme=points[0].x;
+ for(let i=1;i<points.length;i++){
+  const x=points[i].x;
+  if(!dir){if(Math.abs(x-points[start].x)>=7){dir=Math.sign(x-points[start].x);extreme=x}continue}
+  if(dir*(x-extreme)>=0){extreme=x;continue}
+  if(dir*(extreme-x)>=9){
+   const part=points.slice(start,i);
+   if(part.length>1&&Math.abs(part.at(-1).x-part[0].x)>5)result.push(part);
+   start=Math.max(0,i-2);dir=-dir;extreme=x;
+  }
+ }
+ const last=points.slice(start);
+ if(last.length>1&&Math.abs(last.at(-1).x-last[0].x)>5)result.push(last);
+ return result;
+}
+function finish(e){
+ if(!drawing||e.pointerId!==pointerId)return;
+ drawing=false;pointerId=null;
+ const raw=stroke.slice();stroke=[];
+ if(raw.length<2)return;
+ const layers=sweeps(raw).map(part=>part.map(v=>({x:v.x/W,y:v.y/H})));
+ if(!layers.length)return;
+ mountains.push({p:raw.map(v=>({x:v.x/W,y:v.y/H})),layers,opacity:Number(slider.value)/100,start:performance.now()});
+ undone=[];updateButtons();
+}
 canvas.addEventListener('pointerup',finish);canvas.addEventListener('pointercancel',e=>{if(e.pointerId===pointerId){drawing=false;pointerId=null;stroke=[]}});
 undoBtn.onclick=()=>{if(mountains.length){undone.push(mountains.pop());updateButtons()}};
 redoBtn.onclick=()=>{if(undone.length){mountains.push(undone.pop());updateButtons()}};
 clearBtn.onclick=()=>{mountains=[];undone=[];stroke=[];drawing=false;updateButtons()};
 function trace(p){ctx.moveTo(p[0].x,p[0].y);for(let i=1;i<p.length;i++)ctx.lineTo(p[i].x,p[i].y)}
-function drawMountain(m,t){const p=m.p.map(v=>({x:v.x*W,y:v.y*H}));const progress=Math.min(1,Math.max(0,(t-m.start)/2300));const reveal=H*(1-Math.pow(1-progress,2.4));ctx.save();ctx.beginPath();trace(p);ctx.lineTo(p[p.length-1].x,H+1);ctx.lineTo(p[0].x,H+1);ctx.closePath();ctx.clip();ctx.globalAlpha=m.opacity;ctx.fillStyle='#252623';ctx.fillRect(0,0,W,reveal);ctx.restore();ctx.beginPath();trace(p);ctx.globalAlpha=1;ctx.strokeStyle='#20211f';ctx.lineWidth=2.5;ctx.lineCap='round';ctx.lineJoin='round';ctx.stroke()}
+function drawMountain(m,t){
+ const progress=Math.min(1,Math.max(0,(t-m.start)/2300));
+ const reveal=H*(1-Math.pow(1-progress,2.4));
+ // Each directional sweep is drawn separately so overlaps accumulate opacity.
+ for(const layer of m.layers){
+  const p=layer.map(v=>({x:v.x*W,y:v.y*H}));
+  ctx.save();ctx.beginPath();trace(p);
+  ctx.lineTo(p.at(-1).x,H+1);ctx.lineTo(p[0].x,H+1);ctx.closePath();ctx.clip();
+  ctx.globalAlpha=m.opacity;ctx.fillStyle='#252623';
+  ctx.fillRect(0,0,W,reveal);ctx.restore();
+ }
+}
+function inkLine(p){ctx.beginPath();trace(p);ctx.globalAlpha=1;ctx.strokeStyle='#20211f';ctx.lineWidth=2.5;ctx.lineCap='round';ctx.lineJoin='round';ctx.stroke()}
 function render(t){ctx.fillStyle='#f7f4eb';ctx.fillRect(0,0,W,H);for(const m of mountains)drawMountain(m,t);if(stroke.length>1){ctx.beginPath();trace(stroke);ctx.strokeStyle='#20211f';ctx.lineWidth=2.5;ctx.lineJoin='round';ctx.lineCap='round';ctx.stroke()}requestAnimationFrame(render)}requestAnimationFrame(render);
 </script></body></html>
