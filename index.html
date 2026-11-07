@@ -18,7 +18,7 @@ button:disabled{opacity:.35}button:active:not(:disabled){background:#e4e0d5}
 <header><h1>一笔成山</h1><p>以线为脊 · 墨落成峦</p></header>
 <div class="frame" id="frame"><canvas id="c"></canvas></div>
 <section class="panel"><label for="opacity"><span>山体墨色透明度</span><output id="value">20%</output></label><input id="opacity" type="range" min="0" max="100" step="1" value="20"><div class="actions"><button id="undo" disabled>撤回</button><button id="redo" disabled>重做</button><button id="clear" disabled>清空</button></div></section>
-<p class="hint">试着画回环或交叉，观察墨色如何积叠</p>
+<p class="hint">山脊浓墨向下渐淡 · 交叉笔迹自然积墨</p>
 </main><script>
 const canvas=document.getElementById('c'),frameEl=document.getElementById('frame'),ctx=canvas.getContext('2d'),slider=document.getElementById('opacity'),value=document.getElementById('value');
 const undoBtn=document.getElementById('undo'),redoBtn=document.getElementById('redo'),clearBtn=document.getElementById('clear');
@@ -63,18 +63,45 @@ undoBtn.onclick=()=>{if(mountains.length){undone.push(mountains.pop());updateBut
 redoBtn.onclick=()=>{if(undone.length){mountains.push(undone.pop());updateButtons()}};
 clearBtn.onclick=()=>{mountains=[];undone=[];stroke=[];drawing=false;updateButtons()};
 function trace(p){ctx.moveTo(p[0].x,p[0].y);for(let i=1;i<p.length;i++)ctx.lineTo(p[i].x,p[i].y)}
+// Each sweep is a continuous local height field. Draw non-overlapping 1px columns
+// so opacity builds only where separate sweeps or separate strokes overlap.
 function drawMountain(m,t){
- const progress=Math.min(1,Math.max(0,(t-m.start)/2300));
- const reveal=H*(1-Math.pow(1-progress,2.4));
- // Each directional sweep is drawn separately so overlaps accumulate opacity.
+ const progress=Math.min(1,Math.max(0,(t-m.start)/2400));
+ const flow=H*(1-Math.pow(1-progress,2.2));
+ const fade=Math.max(95,H*0.58);
  for(const layer of m.layers){
-  const p=layer.map(v=>({x:v.x*W,y:v.y*H}));
-  ctx.save();ctx.beginPath();trace(p);
-  ctx.lineTo(p.at(-1).x,H+1);ctx.lineTo(p[0].x,H+1);ctx.closePath();ctx.clip();
-  ctx.globalAlpha=m.opacity;ctx.fillStyle='#252623';
-  ctx.fillRect(0,0,W,reveal);ctx.restore();
+  const pts=layer.map(v=>({x:v.x*W,y:v.y*H}));
+  for(let i=1;i<pts.length;i++){
+   const a=pts[i-1],b=pts[i],dx=b.x-a.x;
+   if(Math.abs(dx)<0.8)continue;
+   const lo=Math.max(0,Math.floor(Math.min(a.x,b.x)));
+   const hi=Math.min(Math.ceil(W),Math.ceil(Math.max(a.x,b.x)));
+   for(let x=lo;x<hi;x++){
+    const k=Math.max(0,Math.min(1,(x+0.5-a.x)/dx));
+    const ridge=a.y+(b.y-a.y)*k;
+    const end=Math.min(H,ridge+flow,ridge+fade);
+    if(end<=ridge)continue;
+    const gradient=ctx.createLinearGradient(0,ridge,0,ridge+fade);
+    gradient.addColorStop(0,'rgba(37,38,35,'+m.opacity+')');
+    gradient.addColorStop(1,'rgba(37,38,35,0)');
+    ctx.fillStyle=gradient;
+    ctx.fillRect(x,ridge,1,end-ridge);
+   }
+  }
  }
 }
-function inkLine(p){ctx.beginPath();trace(p);ctx.globalAlpha=1;ctx.strokeStyle='#20211f';ctx.lineWidth=2.5;ctx.lineCap='round';ctx.lineJoin='round';ctx.stroke()}
-function render(t){ctx.fillStyle='#f7f4eb';ctx.fillRect(0,0,W,H);for(const m of mountains)drawMountain(m,t);if(stroke.length>1){ctx.beginPath();trace(stroke);ctx.strokeStyle='#20211f';ctx.lineWidth=2.5;ctx.lineJoin='round';ctx.lineCap='round';ctx.stroke()}requestAnimationFrame(render)}requestAnimationFrame(render);
+function inkLine(p){
+ if(p.length<2)return;
+ ctx.save();ctx.beginPath();trace(p);ctx.globalAlpha=1;
+ ctx.strokeStyle='#20211f';ctx.lineWidth=2.5;ctx.lineCap='round';ctx.lineJoin='round';ctx.stroke();ctx.restore();
+}
+function render(t){
+ ctx.fillStyle='#f7f4eb';ctx.fillRect(0,0,W,H);
+ for(const m of mountains)drawMountain(m,t);
+ // Ink outlines must be rendered last and at full opacity.
+ for(const m of mountains)inkLine(m.p.map(v=>({x:v.x*W,y:v.y*H})));
+ if(stroke.length>1)inkLine(stroke);
+ requestAnimationFrame(render);
+}
+requestAnimationFrame(render);
 </script></body></html>
