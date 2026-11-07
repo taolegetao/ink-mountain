@@ -9,7 +9,7 @@ canvas{width:100%;height:100%;display:block;touch-action:none}
 .panel{flex-shrink:0;padding:16px 18px 14px;background:#f7f4eb;border:1px solid #d4cec0;border-radius:12px}
 label{display:flex;justify-content:space-between;align-items:center;font-size:14px;margin-bottom:11px}output{font-variant-numeric:tabular-nums}
 input[type=range]{display:block;width:100%;accent-color:#262724;touch-action:auto}
-.actions{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:17px}
+.gradient-bar{position:relative;height:34px;border:1px solid #b6b0a3;border-radius:5px;margin:9px 9px 24px;background:#f7f4eb;touch-action:none}.gradient-stop{position:absolute;top:100%;width:20px;height:20px;transform:translate(-50%,-2px);border:2px solid #383934;background:#faf7f0;border-radius:50%;touch-action:none;cursor:grab}.gradient-stop.selected{background:#292a28;border:3px solid #f7f4eb;box-shadow:0 0 0 2px #292a28}.editor-row{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-top:12px;font-size:12px}.editor-row input{flex:1;min-width:0}.editor-row output{width:38px;text-align:right}.editor-actions{display:flex;gap:8px;margin-top:12px}.editor-actions button{flex:1;padding:8px 5px;font-size:12px}.actions{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:17px}
 button{border:1px solid #aaa69c;background:#f7f4eb;border-radius:8px;color:#242522;padding:12px 4px;font-size:14px}
 button:disabled{opacity:.35}button:active:not(:disabled){background:#e4e0d5}
 .hint{text-align:center;font-size:12px;color:#89857b;margin:0;flex-shrink:0}
@@ -17,15 +17,43 @@ button:disabled{opacity:.35}button:active:not(:disabled){background:#e4e0d5}
 </style></head><body><main>
 <header><h1>一笔成山</h1><p>以线为脊 · 墨落成峦</p></header>
 <div class="frame" id="frame"><canvas id="c"></canvas></div>
-<section class="panel"><label for="opacity"><span>山体墨色透明度</span><output id="value">20%</output></label><input id="opacity" type="range" min="0" max="100" step="1" value="20"><div class="actions"><button id="undo" disabled>撤回</button><button id="redo" disabled>重做</button><button id="clear" disabled>清空</button></div></section>
-<p class="hint">山脊浓墨向下渐淡 · 交叉笔迹自然积墨</p>
+<section class="panel"><label><span>墨色渐变编辑器</span><span id="stopCount">3 个控制点</span></label><div id="gradientBar" class="gradient-bar" aria-label="墨色渐变条"></div><div class="editor-row"><span>位置</span><input id="stopPos" aria-label="控制点位置" type="range" min="0" max="100" step="1"><output id="posValue"></output></div><div class="editor-row"><span>浓度</span><input id="stopAlpha" aria-label="控制点浓度" type="range" min="0" max="100" step="1"><output id="alphaValue"></output></div><div class="editor-actions"><button id="addStop">＋ 添加控制点</button><button id="removeStop">－ 删除控制点</button><button id="resetGradient">恢复默认</button></div><div class="actions"><button id="undo" disabled>撤回</button><button id="redo" disabled>重做</button><button id="clear" disabled>清空</button></div></section>
+<p class="hint">调节渐变控制点，再画山 · 交叉笔迹自然积墨</p>
 </main><script>
-const canvas=document.getElementById('c'),frameEl=document.getElementById('frame'),ctx=canvas.getContext('2d'),slider=document.getElementById('opacity'),value=document.getElementById('value');
+const canvas=document.getElementById('c'),frameEl=document.getElementById('frame'),ctx=canvas.getContext('2d');
+const gradientBar=document.getElementById('gradientBar'),posSlider=document.getElementById('stopPos'),alphaSlider=document.getElementById('stopAlpha');
+const defaultStops=[{id:1,pos:0,alpha:70},{id:2,pos:46,alpha:30},{id:3,pos:100,alpha:0}];
+let stops=defaultStops.map(s=>({...s})),selected=2,nextId=4;
+function ordered(){return [...stops].sort((a,b)=>a.pos-b.pos)}
+function selectedStop(){return stops.find(s=>s.id===selected)||stops[0]}
+function updateEditor(){
+ const a=selectedStop();posSlider.value=a.pos;alphaSlider.value=a.alpha;
+ document.getElementById('posValue').textContent=a.pos+'%';document.getElementById('alphaValue').textContent=a.alpha+'%';
+ document.getElementById('stopCount').textContent=stops.length+' 个控制点';
+ document.getElementById('removeStop').disabled=stops.length<=2;
+ document.getElementById('addStop').disabled=stops.length>=8;
+ gradientBar.style.background='linear-gradient(to right,'+ordered().map(s=>'rgba(37,38,35,'+(s.alpha/100)+') '+s.pos+'%').join(',')+')';
+ gradientBar.replaceChildren();
+ for(const s of ordered()){
+  const b=document.createElement('button');b.type='button';b.className='gradient-stop'+(s.id===selected?' selected':'');
+  b.style.left=s.pos+'%';b.setAttribute('aria-label','控制点 '+s.pos+'% 浓度 '+s.alpha+'%');
+  b.addEventListener('pointerdown',e=>{e.stopPropagation();selected=s.id;updateEditor();b.setPointerCapture(e.pointerId)});
+  b.addEventListener('pointermove',e=>{if(e.buttons!==1)return;const r=gradientBar.getBoundingClientRect();s.pos=Math.round(Math.max(0,Math.min(100,(e.clientX-r.left)/r.width*100)));selected=s.id;updateEditor()});
+  gradientBar.appendChild(b);
+ }
+}
+posSlider.addEventListener('input',()=>{selectedStop().pos=+posSlider.value;updateEditor()});
+alphaSlider.addEventListener('input',()=>{selectedStop().alpha=+alphaSlider.value;updateEditor()});
+document.getElementById('addStop').onclick=()=>{if(stops.length>=8)return;const p=Math.min(100,selectedStop().pos+10);const id=nextId++;stops.push({id,pos:p,alpha:50});selected=id;updateEditor()};
+document.getElementById('removeStop').onclick=()=>{if(stops.length<=2)return;stops=stops.filter(s=>s.id!==selected);selected=stops[0].id;updateEditor()};
+document.getElementById('resetGradient').onclick=()=>{stops=defaultStops.map(s=>({...s}));selected=2;updateEditor()};
+gradientBar.addEventListener('click',e=>{if(e.target!==gradientBar)return;const r=gradientBar.getBoundingClientRect();const p=(e.clientX-r.left)/r.width*100;selected=ordered().reduce((a,b)=>Math.abs(b.pos-p)<Math.abs(a.pos-p)?b:a).id;updateEditor()});
+updateEditor();
 const undoBtn=document.getElementById('undo'),redoBtn=document.getElementById('redo'),clearBtn=document.getElementById('clear');
 let W=0,H=0,D=1,mountains=[],undone=[],stroke=[],drawing=false,pointerId=null;
 function resize(){const r=frameEl.getBoundingClientRect();W=Math.max(1,r.width);H=Math.max(1,r.height);D=Math.min(devicePixelRatio||1,2);canvas.width=Math.round(W*D);canvas.height=Math.round(H*D);ctx.setTransform(D,0,0,D,0,0)}
 new ResizeObserver(resize).observe(frameEl);resize();
-slider.addEventListener('input',()=>value.textContent=slider.value+'%');
+
 function updateButtons(){undoBtn.disabled=mountains.length===0;redoBtn.disabled=undone.length===0;clearBtn.disabled=mountains.length===0}
 function point(e){const r=canvas.getBoundingClientRect();return{x:Math.max(0,Math.min(W,e.clientX-r.left)),y:Math.max(0,Math.min(H,e.clientY-r.top))}}
 canvas.addEventListener('pointerdown',e=>{if(drawing)return;drawing=true;pointerId=e.pointerId;stroke=[point(e)];canvas.setPointerCapture(e.pointerId)});
@@ -55,7 +83,7 @@ function finish(e){
  if(raw.length<2)return;
  const layers=sweeps(raw).map(part=>part.map(v=>({x:v.x/W,y:v.y/H})));
  if(!layers.length)return;
- mountains.push({p:raw.map(v=>({x:v.x/W,y:v.y/H})),layers,opacity:Number(slider.value)/100,start:performance.now()});
+ mountains.push({p:raw.map(v=>({x:v.x/W,y:v.y/H})),layers,gradient:ordered().map(s=>({pos:s.pos,alpha:s.alpha})),start:performance.now()});
  undone=[];updateButtons();
 }
 canvas.addEventListener('pointerup',finish);canvas.addEventListener('pointercancel',e=>{if(e.pointerId===pointerId){drawing=false;pointerId=null;stroke=[]}});
@@ -65,7 +93,12 @@ clearBtn.onclick=()=>{mountains=[];undone=[];stroke=[];drawing=false;updateButto
 function trace(p){ctx.moveTo(p[0].x,p[0].y);for(let i=1;i<p.length;i++)ctx.lineTo(p[i].x,p[i].y)}
 // Build a seamless ink layer once per sweep, using one pixel buffer instead of
 // overlapping translucent rectangles. Texture is deliberately drawn separately.
-function buildLayer(layer){
+function gradientAlpha(gradient,percent){
+ if(percent<=gradient[0].pos)return gradient[0].alpha/100;
+ for(let i=1;i<gradient.length;i++){const a=gradient[i-1],b=gradient[i];if(percent<=b.pos){const t=b.pos===a.pos?1:(percent-a.pos)/(b.pos-a.pos);return (a.alpha+(b.alpha-a.alpha)*t)/100}}
+ return gradient[gradient.length-1].alpha/100;
+}
+function buildLayer(layer,gradient){
  const off=document.createElement('canvas');
  off.width=Math.ceil(W);off.height=Math.ceil(H);
  const og=off.getContext('2d');
@@ -88,7 +121,7 @@ function buildLayer(layer){
   const top=ridge[x];if(!Number.isFinite(top))continue;
   for(let y=Math.max(0,Math.floor(top));y<Math.min(off.height,Math.ceil(top+fade));y++){
    const dist=Math.max(0,(y+.5-top)/fade);
-   const alpha=Math.round(255*Math.pow(1-dist,1.45));
+   const alpha=Math.round(255*gradientAlpha(gradient,dist*100));
    const k=(y*off.width+x)*4;
    pixels.data[k]=37;pixels.data[k+1]=38;pixels.data[k+2]=35;pixels.data[k+3]=alpha;
   }
@@ -98,20 +131,20 @@ function buildLayer(layer){
 }
 function drawMountain(m,t){
  if(!m.cache||m.cacheW!==Math.ceil(W)||m.cacheH!==Math.ceil(H)){
-  m.cache=m.layers.map(buildLayer);m.cacheW=Math.ceil(W);m.cacheH=Math.ceil(H);
+  m.cache=m.layers.map(layer=>buildLayer(layer,m.gradient));m.cacheW=Math.ceil(W);m.cacheH=Math.ceil(H);
  }
  const progress=Math.min(1,Math.max(0,(t-m.start)/2400));
  const flow=H*(1-Math.pow(1-progress,2.2));
  for(let li=0;li<m.cache.length;li++){
   const item=m.cache[li];
   // Apply opacity once per layer; overlap only accumulates between actual sweeps.
-  ctx.save();ctx.globalAlpha=m.opacity;
+  ctx.save();ctx.globalAlpha=1;
   const visible=H*(1-Math.pow(1-progress,2.2));
   ctx.save();ctx.beginPath();ctx.rect(0,0,W,visible);ctx.clip();ctx.drawImage(item.off,0,0);ctx.restore();
   ctx.restore();
   // Explicit fine ink grain, stable across devices and not dependent on seams.
   ctx.save();ctx.strokeStyle='#252623';ctx.lineWidth=.65;
-  ctx.globalAlpha=Math.min(.14,m.opacity*.22);
+  ctx.globalAlpha=Math.min(.14,Math.max(...m.gradient.map(s=>s.alpha))/100*.22);
   const step=5.5;
   for(let x=3+((li*2.3)%step);x<W;x+=step){
    const xi=Math.floor(x),top=item.ridge[xi];
