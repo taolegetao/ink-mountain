@@ -18,7 +18,7 @@ button{border:1px solid #aaa69c;background:#f7f4eb;border-radius:8px;color:#2425
 <header><h1>一笔成山</h1><p>以线为脊 · 墨落成峦</p></header>
 <div class="frame" id="frame"><canvas id="c"></canvas></div>
 <section class="panel"><div class="brush-switch" role="group" aria-label="画笔模式"><button id="lineBrush" class="active" aria-pressed="true">线成山</button><button id="peakBrush" aria-pressed="false">峰成山</button></div><label><span>墨色浓度</span><output id="alphaValue">50%</output></label><div id="gradientBar" class="gradient-bar" aria-label="墨色预览"></div><div class="editor-row"><span>淡</span><input id="stopAlpha" aria-label="墨色浓度" type="range" min="0" max="100" step="1" value="50"><span>浓</span></div><div class="editor-row"><span>湿墨晕染</span><input id="wetAmount" aria-label="湿墨晕染强度" type="range" min="0" max="100" step="1" value="65"><output id="wetValue">65%</output></div><div class="actions"><button id="undo" disabled>撤回</button><button id="redo" disabled>重做</button><button id="clear" disabled>清空</button></div></section>
-<p class="hint">随笔成山 · 调一调湿墨晕染</p>
+<p class="hint">随笔成山 · 墨流相遇，方才晕开</p>
 </main><script>
 const canvas=document.getElementById('c'),frameEl=document.getElementById('frame'),ctx=canvas.getContext('2d');
 const gradientBar=document.getElementById('gradientBar'),alphaSlider=document.getElementById('stopAlpha');
@@ -225,16 +225,34 @@ function overlapHalo(older,newer){
 }
 function drawWetOverlap(m,index,t){
  const strength=+wetSlider.value/100;
- if(strength<=0)return;
- // Keep the result after drying so the user can compare slider settings live.
+ if(strength<=0||!m.cache)return;
  const bloom=Math.min(1,Math.max(0,(t-m.start-100)/750));
  if(!bloom)return;
+ const newProgress=Math.min(1,Math.max(0,(t-m.start-180)/3000));
+ if(newProgress<=0)return;
  for(let i=0;i<index;i++){
   const previous=mountains[i],gap=m.start-previous.start;
   if(gap>9000||gap<0||!previous.cache)continue;
   const wetness=Math.pow(1-gap/9000,.7);
-  ctx.save();ctx.globalAlpha=Math.min(1,strength*1.25)*wetness*bloom;
-  ctx.drawImage(overlapHalo(previous,m),0,0);ctx.restore();
+  const oldProgress=Math.min(1,Math.max(0,(t-previous.start-180)/3000));
+  if(oldProgress<=0)continue;
+  const halo=overlapHalo(previous,m);
+  // Restrict the halo to BOTH ink fronts at this exact animation frame.
+  // This prevents a future intersection from appearing before the ink arrives.
+  for(let oi=0;oi<previous.cache.length;oi++){
+   const oldItem=previous.cache[oi];
+   ctx.save();
+   clipInkFront(oldItem,oldProgress,(previous.seed||1)+oi*2.31);
+   for(let ni=0;ni<m.cache.length;ni++){
+    const newItem=m.cache[ni];
+    ctx.save();
+    clipInkFront(newItem,newProgress,(m.seed||1)+ni*2.31);
+    ctx.globalAlpha=Math.min(1,strength*1.25)*wetness*bloom;
+    ctx.drawImage(halo,0,0);
+    ctx.restore();
+   }
+   ctx.restore();
+  }
  }
 }
 function inkLine(p){
