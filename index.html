@@ -76,7 +76,7 @@ function finish(e){
  const layers=parts.map(part=>part.map(v=>({x:v.x/W,y:v.y/H})));
  const ridgeWeights=peakEnvelope(raw);
  const indexByPoint=new Map(raw.map((p,i)=>[p,i]));
- const layerWeights=parts.map(part=>part.map(p=>ridgeWeights[indexByPoint.get(p)]??1));
+ const layerWeights=peak?parts.map(part=>part.map(p=>ridgeWeights[indexByPoint.get(p)]??1)):null;
  if(!layers.length)return;
  mountains.push({p:source.map(v=>({x:v.x/W,y:v.y/H})),layers,layerWeights,ridgeWeights,peak,ink:inkStrength(),seed:mountains.length*1.83+raw[0].x*.037+raw[0].y*.021,start:performance.now()});
  undone=[];updateButtons();
@@ -119,7 +119,7 @@ function buildLayer(layer,ink,peak=false,weights=null){
   const top=ridge[x];if(!Number.isFinite(top))continue;
   for(let y=Math.max(0,Math.floor(top));y<Math.min(off.height,Math.ceil(top+fade));y++){
    const dist=Math.max(0,(y+.5-top)/fade);
-   const taper=strength[x];
+   const taper=peak?strength[x]:1;
    const alpha=Math.round(255*ink*taper*Math.pow(Math.max(0,1-dist),1.35));
    const k=(y*off.width+x)*4;
    pixels.data[k]=37;pixels.data[k+1]=38;pixels.data[k+2]=35;pixels.data[k+3]=alpha;
