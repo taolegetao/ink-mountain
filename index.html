@@ -18,7 +18,7 @@ button{border:1px solid #aaa69c;background:#f7f4eb;border-radius:8px;color:#2425
 <header><h1>一笔成山</h1><p>以线为脊 · 墨落成峦</p></header>
 <div class="frame" id="frame"><canvas id="c"></canvas></div>
 <section class="panel"><div class="brush-switch" role="group" aria-label="画笔模式"><button id="lineBrush" class="active" aria-pressed="true">线成山</button><button id="peakBrush" aria-pressed="false">峰成山</button></div><label><span>墨色浓度</span><output id="alphaValue">50%</output></label><div id="gradientBar" class="gradient-bar" aria-label="墨色预览"></div><div class="editor-row"><span>淡</span><input id="stopAlpha" aria-label="墨色浓度" type="range" min="0" max="100" step="1" value="50"><span>浓</span></div><div class="editor-row"><span>湿墨晕染</span><input id="wetAmount" aria-label="湿墨晕染强度" type="range" min="0" max="100" step="1" value="65"><output id="wetValue">65%</output></div><div class="actions"><button id="undo" disabled>撤回</button><button id="redo" disabled>重做</button><button id="clear" disabled>清空</button></div></section>
-<p class="hint">随笔成山 · 交叠之处，自然洇开</p>
+<p class="hint">随笔成山 · 墨色相遇，边缘轻洇</p>
 </main><script>
 const canvas=document.getElementById('c'),frameEl=document.getElementById('frame'),ctx=canvas.getContext('2d');
 const gradientBar=document.getElementById('gradientBar'),alphaSlider=document.getElementById('stopAlpha');
@@ -202,10 +202,12 @@ function drawMountain(m,t,index){
 // not the product of two faint alphas (which was nearly invisible in V19).
 // Wet-on-wet changes the NEW layer's alpha at the actual overlap boundary.
 // No third dark shape is drawn: ordinary alpha compositing still does the mixing.
+// V23: redistribute existing overlap ink across its boundary, instead of
+// painting an extra dark mask or merely erasing the overlap's interior.
 function wetLayer(m,index,li){
  const amount=+wetSlider.value/100,original=m.cache[li].off;
  if(amount<=0||index===0)return original;
- const key=[Math.ceil(W),Math.ceil(H),amount,index,li].join(':');
+ const key=[Math.ceil(W),Math.ceil(H),amount,index,li,m.start].join(':');
  if(!m.wetCache)m.wetCache=new Map();
  if(m.wetCache.has(key))return m.wetCache.get(key);
  const make=()=>{const c=document.createElement('canvas');c.width=Math.ceil(W);c.height=Math.ceil(H);return c};
@@ -213,29 +215,41 @@ function wetLayer(m,index,li){
  let eligible=false;
  for(let i=0;i<index;i++){
   const prior=mountains[i],gap=m.start-prior.start;
-  if(gap>=0&&gap<9000&&prior.cache){eligible=true;for(const layer of prior.cache)oc.drawImage(layer.off,0,0)}
+  if(gap>=0&&gap<9000&&prior.cache){
+   eligible=true;
+   for(const layer of prior.cache)oc.drawImage(layer.off,0,0);
+  }
  }
  if(!eligible){m.wetCache.set(key,original);return original}
- const nw=original.getContext('2d',{willReadFrequently:true}).getImageData(0,0,original.width,original.height);
- const od=oc.getImageData(0,0,old.width,old.height).data;
- const mask=make(),mc=mask.getContext('2d');const md=mc.createImageData(mask.width,mask.height);
- // Binary-ish intersection, with continuous edges from original ink alpha.
- for(let i=3;i<md.data.length;i+=4){
-  const overlap=Math.min(od[i],nw.data[i]);
-  md.data[i]=overlap>12?Math.min(255,overlap*2.5):0;
+ const w=original.width,h=original.height;
+ const nw=original.getContext('2d',{willReadFrequently:true}).getImageData(0,0,w,h);
+ const od=oc.getImageData(0,0,w,h).data;
+ const overlap=make(),mc=overlap.getContext('2d');
+ const intersection=mc.createImageData(w,h);
+ let hasOverlap=false;
+ for(let i=3;i<intersection.data.length;i+=4){
+  const a=Math.min(od[i],nw.data[i]);
+  intersection.data[i]=a;
+  if(a>15)hasOverlap=true;
  }
- mc.putImageData(md,0,0);
- const blurred=make(),bc=blurred.getContext('2d',{willReadFrequently:true});
- bc.filter='blur('+(2+amount*8)+'px)';bc.drawImage(mask,0,0);bc.filter='none';
- const soft=bc.getImageData(0,0,blurred.width,blurred.height).data;
- // Replace part of the new ink's hard intersection boundary with a soft alpha transition.
- // Never add alpha: the darkening remains solely the original two-layer overlap.
- for(let i=3;i<nw.data.length;i+=4){
-  if(nw.data[i]<4||od[i]<8)continue;
-  const hard=md.data[i],smooth=soft[i];
-  const change=Math.max(0,hard-smooth)/255;
-  const factor=1-amount*.8*change;
-  nw.data[i]=Math.round(nw.data[i]*factor);
+ if(!hasOverlap){m.wetCache.set(key,original);return original}
+ mc.putImageData(intersection,0,0);
+ const soft=make(),sc=soft.getContext('2d',{willReadFrequently:true});
+ sc.filter='blur('+(3+amount*13)+'px)';sc.drawImage(overlap,0,0);sc.filter='none';
+ const blurred=sc.getImageData(0,0,w,h).data;
+ const originalPixels=nw.data;
+ for(let i=3;i<originalPixels.length;i+=4){
+  // Only wet paper shared with old ink can absorb redistributed pigment.
+  // Blurred intersection adds at its outer fringe and removes in its core.
+  const oldAlpha=od[i];if(oldAlpha<6)continue;
+  const hard=intersection.data[i],softAlpha=blurred[i];
+  if(hard<2&&softAlpha<2)continue;
+  const gate=Math.min(1,oldAlpha/40);
+  const delta=(softAlpha-hard)*amount*1.55*gate;
+  const next=Math.max(0,Math.min(255,originalPixels[i]+delta));
+  if(next<1)continue;
+  originalPixels[i-3]=37;originalPixels[i-2]=38;originalPixels[i-1]=35;
+  originalPixels[i]=Math.round(next);
  }
  const result=make();result.getContext('2d').putImageData(nw,0,0);
  m.wetCache.set(key,result);return result;
