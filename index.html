@@ -18,7 +18,7 @@ button{border:1px solid #aaa69c;background:#f7f4eb;border-radius:8px;color:#2425
 <header><h1>一笔成山</h1><p>以线为脊 · 墨落成峦</p></header>
 <div class="frame" id="frame"><canvas id="c"></canvas></div>
 <section class="panel"><div class="brush-switch" role="group" aria-label="画笔模式"><button id="lineBrush" class="active" aria-pressed="true">线成山</button><button id="peakBrush" aria-pressed="false">峰成山</button></div><label><span>墨色浓度</span><output id="alphaValue">50%</output></label><div id="gradientBar" class="gradient-bar" aria-label="墨色预览"></div><div class="editor-row"><span>淡</span><input id="stopAlpha" aria-label="墨色浓度" type="range" min="0" max="100" step="1" value="50"><span>浓</span></div><div class="actions"><button id="undo" disabled>撤回</button><button id="redo" disabled>重做</button><button id="clear" disabled>清空</button></div></section>
-<p class="hint">随笔成山 · 起笔收笔皆有墨韵</p>
+<p class="hint">随笔成山 · 墨未干时，山色相融</p>
 </main><script>
 const canvas=document.getElementById('c'),frameEl=document.getElementById('frame'),ctx=canvas.getContext('2d');
 const gradientBar=document.getElementById('gradientBar'),alphaSlider=document.getElementById('stopAlpha');
@@ -194,6 +194,36 @@ function drawMountain(m,t){
   ctx.restore();
  }
 }
+// A restrained wet-on-wet halo: only the shared ink area is softened.
+// Cached per pair, so mobile rendering stays light.
+function overlapHalo(older,newer){
+ const key=Math.ceil(W)+'x'+Math.ceil(H);
+ if(!newer.wetCache)newer.wetCache=new Map();
+ const id=older.start+'-'+key;
+ if(newer.wetCache.has(id))return newer.wetCache.get(id);
+ const make=()=>{const c=document.createElement('canvas');c.width=Math.ceil(W);c.height=Math.ceil(H);return c};
+ const a=make(),b=make(),mix=make();
+ const ac=a.getContext('2d'),bc=b.getContext('2d'),mc=mix.getContext('2d');
+ for(const item of older.cache)ac.drawImage(item.off,0,0);
+ for(const item of newer.cache)bc.drawImage(item.off,0,0);
+ mc.drawImage(b,0,0);mc.globalCompositeOperation='destination-in';mc.drawImage(a,0,0);
+ const blurred=make(),bg=blurred.getContext('2d');
+ bg.filter='blur(5px)';bg.drawImage(mix,0,0);bg.filter='none';
+ newer.wetCache.set(id,blurred);return blurred;
+}
+function drawWetOverlap(m,index,t){
+ const age=t-m.start;
+ if(age<0||age>6000)return;
+ const bloom=Math.min(1,Math.max(0,(age-250)/850));
+ if(!bloom)return;
+ for(let i=0;i<index;i++){
+  const previous=mountains[i],gap=m.start-previous.start;
+  if(gap>6500||gap<0||!previous.cache)continue;
+  const wetness=Math.pow(1-gap/6500,1.25);
+  ctx.save();ctx.globalAlpha=.38*wetness*bloom;
+  ctx.drawImage(overlapHalo(previous,m),0,0);ctx.restore();
+ }
+}
 function inkLine(p){
  if(p.length<2)return;
  ctx.save();ctx.beginPath();trace(p);ctx.globalAlpha=1;
@@ -249,6 +279,8 @@ function wetRidge(m,t){
 function render(t){
  ctx.fillStyle='#f7f4eb';ctx.fillRect(0,0,W,H);
  for(const m of mountains)drawMountain(m,t);
+ // Let fresh layers softly bleed into still-wet older layers.
+ for(let i=0;i<mountains.length;i++)drawWetOverlap(mountains[i],i,t);
  // Wet ridges are rendered last; their opacity settles toward the chosen ink strength.
  for(const m of mountains)wetRidge(m,t);
  if(stroke.length>1)inkLine(stroke);
