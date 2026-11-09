@@ -1,25 +1,140 @@
 <!doctype html>
-<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no"><title>一笔成山 · 水墨版</title>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>一笔成山 · 青绿卷</title>
 <style>
-*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:#eeeae0;color:#242522;font-family:system-ui,-apple-system,sans-serif}
-body{display:flex;justify-content:center}main{width:min(100%,900px);min-height:100dvh;padding:calc(20px + env(safe-area-inset-top)) 18px calc(24px + env(safe-area-inset-bottom));display:flex;flex-direction:column;gap:16px}
-header{text-align:center;flex-shrink:0}h1{font-size:24px;letter-spacing:6px;font-weight:500;margin:0 0 6px}header p{font-size:12px;color:#89857b;letter-spacing:2px;margin:0}
-.frame{position:relative;flex:1;min-height:220px;max-height:68dvh;border:1px solid #bbb6a9;background:#f7f4eb;overflow:hidden;box-shadow:0 2px 12px #2928200a}
-canvas{width:100%;height:100%;display:block;touch-action:none}
-.panel{flex-shrink:0;padding:16px 18px 14px;background:#f7f4eb;border:1px solid #d4cec0;border-radius:12px}
-label{display:flex;justify-content:space-between;align-items:center;font-size:14px;margin-bottom:11px}output{font-variant-numeric:tabular-nums}
-input[type=range]{display:block;width:100%;accent-color:#262724;touch-action:auto}
-.gradient-bar{height:28px;border:1px solid #b6b0a3;border-radius:5px;margin:8px 0 15px;background:#f7f4eb}.editor-row{display:flex;align-items:center;gap:10px;margin-top:12px;font-size:13px}.editor-row span{min-width:64px}.editor-row input{flex:1;min-width:0}.editor-row output{width:42px;text-align:right}.actions{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:17px}
-button{border:1px solid #aaa69c;background:#f7f4eb;border-radius:8px;color:#242522;padding:12px 4px;font-size:14px}
- .brush-switch{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-bottom:15px}.brush-switch button{padding:9px 4px;border-radius:7px}.brush-switch button.active{background:#dedbd1;border-color:#77766e;font-weight:600}button:disabled{opacity:.35}button:active:not(:disabled){background:#e4e0d5}
-.hint{text-align:center;font-size:12px;color:#89857b;margin:0;flex-shrink:0}
-@media(min-width:700px){main{padding-top:34px;padding-bottom:30px}.frame{max-height:66dvh;min-height:380px}}
-</style></head><body><main>
-<header><h1>一笔成山</h1><p>以线为脊 · 墨落成峦</p></header>
-<div class="frame" id="frame"><canvas id="c"></canvas></div>
-<section class="panel"><div class="brush-switch" role="group" aria-label="画笔模式"><button id="lineBrush" class="active" aria-pressed="true">线成山</button><button id="peakBrush" aria-pressed="false">峰成山</button></div><label><span>墨色浓度</span><output id="alphaValue">50%</output></label><div id="gradientBar" class="gradient-bar" aria-label="墨色预览"></div><div class="editor-row"><span>淡</span><input id="stopAlpha" aria-label="墨色浓度" type="range" min="0" max="100" step="1" value="50"><span>浓</span></div><div class="actions"><button id="undo" disabled>撤回</button><button id="redo" disabled>重做</button><button id="clear" disabled>清空</button></div></section>
+:root {
+  color-scheme: light;
+  --stone: #42718f;
+  --deep: #163846;
+  --lake: #84aaa2;
+  --pale: #bbc8a9;
+  --paper: #f7f4eb;
+  --cream: #eee6d3;
+  --gold: #d1b172;
+  --line: #c7ae7e;
+  --ink: #24444a;
+  --muted: #526b68;
+  --serif: "Noto Serif SC", "Songti SC", SimSun, serif;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  min-height: 100dvh;
+  color: var(--ink);
+  font-family: "Microsoft YaHei", system-ui, sans-serif;
+  background: radial-gradient(ellipse at 15% 0%, #376478, transparent 65%), var(--deep);
+}
+main { max-width: 1560px; margin: auto; padding: 24px clamp(22px, 4vw, 66px) 18px; }
+.masthead {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 20px 30px;
+  overflow: hidden;
+  border: 1px solid #d1b17280;
+  background: linear-gradient(105deg, #1d4050, #396582);
+  color: var(--paper);
+}
+.mountains { position: absolute; right: 0; bottom: 0; width: min(68%, 790px); height: 100%; z-index: -1; }
+.kicker, .folio { margin: 0; color: #e8d5af; font-size: 12px; letter-spacing: .22em; }
+h1 { font: 600 clamp(32px, 4vw, 49px)/1.12 var(--serif); letter-spacing: .17em; margin: 7px 0; }
+.subtitle { color: #e3ece5; font: 15px var(--serif); letter-spacing: .14em; margin: 0; }
+.folio { align-self: flex-start; padding: 7px 9px; border: 1px solid #d1b17280; white-space: nowrap; }
+.workspace { display: grid; grid-template-columns: minmax(0, 1fr) 268px; gap: 18px; margin-top: 16px; align-items: stretch; }
+.scroll { min-width: 0; display: flex; flex-direction: column; padding: 0 12px 9px; border: 1px solid var(--line); background: var(--cream); }
+.scroll-head, .scroll-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 2px; font-size: 12px; color: var(--muted); }
+.scroll-head strong { font: 600 15px var(--serif); letter-spacing: .18em; color: var(--ink); }
+.scroll-foot { padding-bottom: 0; }
+.frame {
+  position: relative;
+  height: clamp(390px, calc(100dvh - 256px), 820px);
+  background: var(--paper);
+  overflow: hidden;
+  outline: 1px solid #a78e60;
+}
+canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
+.frame::after {
+  content: "";
+  position: absolute;
+  inset: 7px;
+  pointer-events: none;
+  background: conic-gradient(from 90deg at 1px 1px, transparent 90deg, #a78e606b 0) 0 0 / 14px 14px no-repeat;
+  border: 1px solid #a78e602c;
+}
+.panel { display: flex; flex-direction: column; min-width: 0; padding: 19px 16px; border: 1px solid var(--line); background: var(--paper); }
+.panel-title { font: 600 23px var(--serif); letter-spacing: .2em; margin: 0 0 5px; }
+.panel-intro { margin: 0 0 16px; font-size: 12px; color: var(--muted); }
+fieldset { min-width: 0; margin: 0; padding: 13px 0; border: 0; border-top: 1px solid #d8c9a8; }
+legend { padding: 0 9px 0 0; font: 600 15px var(--serif); letter-spacing: .1em; }
+.brush-switch, .actions { display: grid; gap: 7px; }
+.brush-switch { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.actions { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+button { color: var(--ink); background: #f3f1e8; border: 1px solid #a7b8ae; padding: 9px 3px; font: 600 14px var(--serif); cursor: pointer; }
+button:hover:not(:disabled) { background: #e2ebe1; border-color: var(--stone); }
+button.active, button.active:hover { color: white; background: #315c6c; border-color: #315c6c; box-shadow: inset 0 -2px var(--lake); }
+button:disabled { opacity: .46; cursor: default; }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--stone); outline-offset: 3px; }
+label { display: flex; justify-content: space-between; align-items: center; font-size: 13px; }
+output { color: #315c6c; font-variant-numeric: tabular-nums; }
+.gradient-bar { height: 21px; margin: 8px 0; border: 1px solid #bfb5a3; }
+.editor-row { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
+input[type=range] { width: 100%; min-width: 0; margin: 0; accent-color: #315c6c; }
+.panel-note { margin: auto 0 0; padding-top: 12px; color: var(--muted); line-height: 1.65; font-size: 12px; border-top: 1px solid #d8c9a8; }
+.hint { margin: 12px 0 0; text-align: center; color: #e2eadd; font: 13px var(--serif); letter-spacing: .17em; }
+@media (max-width: 790px) {
+  main { padding: 14px; }
+  .masthead { padding: 16px; }
+  .workspace { grid-template-columns: 1fr; }
+  .frame { height: max(285px, 48dvh); }
+}
+</style>
+</head>
+<body><main>
+<header class="masthead">
+  <svg class="mountains" aria-hidden="true" viewBox="0 0 800 140" preserveAspectRatio="none">
+    <path fill="#bbc8a9" opacity=".44" d="M160 140 282 85 327 99 418 44 451 49 508 16 583 72 640 53 710 16 800 61V140Z"/>
+    <path fill="#84aaa2" d="M255 140 337 105 392 111 447 75 494 85 574 53 631 100 715 62 763 83 800 70V140Z"/>
+    <path fill="#42718f" d="M350 140 438 119 509 122 566 92 617 117 672 91 731 111 800 88V140Z"/>
+    <path fill="none" stroke="#d1b172" opacity=".58" d="M255 140 337 105 392 111 447 75 494 85 574 53 631 100 715 62 763 83 800 70"/>
+  </svg>
+  <div><p class="kicker">山水画坊</p><h1>一笔成山</h1><p class="subtitle">以线为脊 · 墨落成峦</p></div>
+  <p class="folio">青绿卷</p>
+</header>
+<div class="workspace">
+  <section class="scroll" aria-label="画卷">
+    <div class="scroll-head"><strong>宣纸画卷</strong><span>按住鼠标，拖动画出山脊</span></div>
+    <div class="frame" id="frame"><canvas id="c" aria-label="山水画布"></canvas></div>
+    <div class="scroll-foot"><span>月白笺</span><span>松开落墨 · 再落一笔可叠山</span></div>
+  </section>
+  <aside class="panel" aria-label="画具">
+    <h2 class="panel-title">笔墨</h2>
+    <p class="panel-intro">选笔式，调墨色。</p>
+    <fieldset>
+      <legend>笔式</legend>
+      <div class="brush-switch"><button id="lineBrush" class="active" aria-pressed="true">线成山</button><button id="peakBrush" aria-pressed="false">峰成山</button></div>
+    </fieldset>
+    <fieldset>
+      <legend>调墨</legend>
+      <label for="stopAlpha"><span>墨色浓度</span><output id="alphaValue" for="stopAlpha">50%</output></label>
+      <div id="gradientBar" class="gradient-bar" aria-hidden="true"></div>
+      <div class="editor-row"><span>淡</span><input id="stopAlpha" type="range" min="0" max="100" step="1" value="50"><span>浓</span></div>
+    </fieldset>
+    <fieldset>
+      <legend>画卷操作</legend>
+      <div class="actions"><button id="undo" disabled>撤回</button><button id="redo" disabled>重做</button><button id="clear" disabled>清空</button></div>
+    </fieldset>
+    <p class="panel-note">线笔保留竖向墨纹，峰笔在起落处收淡。落笔后，墨色会沿山脊向下流淌。</p>
+  </aside>
+</div>
 <p class="hint">随笔成山 · 起笔收笔皆有墨韵</p>
-</main><script>
+</main>
+<script>
 const canvas=document.getElementById('c'),frameEl=document.getElementById('frame'),ctx=canvas.getContext('2d');
 const gradientBar=document.getElementById('gradientBar'),alphaSlider=document.getElementById('stopAlpha');
 function inkStrength(){return +alphaSlider.value/100}
